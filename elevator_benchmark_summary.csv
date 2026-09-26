@@ -1,0 +1,10 @@
+Strategy,TrafficProfile,PassengersServed,TotalTicks,AvgWaitTime,95thPercentileWait,MaxWaitTime,AvgTransitTime,TotalDistanceFloors,EnergyKWh
+"FCFS (First-Come, First-Served)","Morning Up-Peak (Lobby -> Upper Floors)",23,2000,25.57,59.00,69,7.83,214,107.00
+"Nearest-Car (SSTF)","Morning Up-Peak (Lobby -> Upper Floors)",24,2000,25.96,65.00,81,8.04,199,99.50
+"SCAN / LOOK (Elevator Sweep)","Morning Up-Peak (Lobby -> Upper Floors)",24,2000,22.92,60.00,67,8.38,202,101.00
+"FCFS (First-Come, First-Served)","Inter-Floor Balanced (Random)",32,2000,12.84,68.00,75,7.38,182,91.00
+"Nearest-Car (SSTF)","Inter-Floor Balanced (Random)",39,2000,12.64,62.00,66,7.72,177,88.50
+"SCAN / LOOK (Elevator Sweep)","Inter-Floor Balanced (Random)",42,2000,15.24,57.00,70,8.50,169,84.50
+"FCFS (First-Come, First-Served)","Evening Down-Peak (Upper Floors -> Lobby)",38,2000,15.29,60.00,60,8.82,189,94.50
+"Nearest-Car (SSTF)","Evening Down-Peak (Upper Floors -> Lobby)",38,2000,20.05,72.00,75,9.61,183,91.50
+"SCAN / LOOK (Elevator Sweep)","Evening Down-Peak (Upper Floors -> Lobby)",41,2000,19.15,67.00,76,8.37,209,104.50
