@@ -1,0 +1,724 @@
+/**
+ * ============================================================================
+ *                    SMART ELEVATOR SIMULATION ENGINE (JS)
+ * ============================================================================
+ * Implements the Strategy Pattern, State Machine, and Discrete-Event Engine
+ * in pure modern JavaScript for the interactive web frontend.
+ */
+
+// ---------------------------------------------------------------------------
+// 1. CONSTANTS & ENUMS
+// ---------------------------------------------------------------------------
+const TOTAL_FLOORS = 10; // Floors 0 to 9
+const NUM_ELEVATORS = 3;
+const ELEVATOR_CAPACITY_KG = 650.0;
+const DOOR_DWELL_TICKS = 2;
+
+const Direction = {
+  UP: 'UP',
+  DOWN: 'DOWN',
+  IDLE: 'IDLE'
+};
+
+// ---------------------------------------------------------------------------
+// 2. PASSENGER CLASS
+// ---------------------------------------------------------------------------
+class Passenger {
+  constructor(id, sourceFloor, destinationFloor, weightKg, spawnTick) {
+    this.id = id;
+    this.sourceFloor = sourceFloor;
+    this.destinationFloor = destinationFloor;
+    this.weightKg = weightKg;
+    this.spawnTick = spawnTick;
+    this.pickupTick = -1;
+    this.dropoffTick = -1;
+  }
+
+  getDesiredDirection() {
+    if (this.destinationFloor > this.sourceFloor) return Direction.UP;
+    if (this.destinationFloor < this.sourceFloor) return Direction.DOWN;
+    return Direction.IDLE;
+  }
+
+  getWaitTime() {
+    return this.pickupTick < 0 ? -1 : (this.pickupTick - this.spawnTick);
+  }
+
+  getTransitTime() {
+    return (this.dropoffTick < 0 || this.pickupTick < 0) ? -1 : (this.dropoffTick - this.pickupTick);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3. ELEVATOR CLASS (STATE MACHINE & ENCAPSULATION)
+// ---------------------------------------------------------------------------
+class Elevator {
+  constructor(id, initialFloor = 0) {
+    this.id = id;
+    this.currentFloor = initialFloor;
+    this.direction = Direction.IDLE;
+    this.state = 'IDLE'; // 'IDLE', 'MOVING_UP', 'MOVING_DOWN', 'DOORS_OPEN'
+    this.targetFloors = new Set();
+    this.onboardPassengers = [];
+    this.currentWeightKg = 0.0;
+    this.totalDistanceTraveled = 0;
+    this.doorCountdown = 0;
+  }
+
+  hasTarget(floor) {
+    return this.targetFloors.has(floor);
+  }
+
+  addTarget(floor) {
+    this.targetFloors.add(floor);
+  }
+
+  removeTarget(floor) {
+    this.targetFloors.delete(floor);
+  }
+
+  hasTargetsAbove() {
+    for (const f of this.targetFloors) {
+      if (f > this.currentFloor) return true;
+    }
+    return false;
+  }
+
+  hasTargetsBelow() {
+    for (const f of this.targetFloors) {
+      if (f < this.currentFloor) return true;
+    }
+    return false;
+  }
+
+  boardPassenger(passenger, currentTick) {
+    if (this.currentWeightKg + passenger.weightKg > ELEVATOR_CAPACITY_KG) {
+      return false; // Capacity exceeded
+    }
+    this.onboardPassengers.push(passenger);
+    this.currentWeightKg += passenger.weightKg;
+    passenger.pickupTick = currentTick;
+    this.addTarget(passenger.destinationFloor);
+    return true;
+  }
+
+  disembarkPassengers(currentTick) {
+    const alighting = [];
+    const remaining = [];
+
+    for (const p of this.onboardPassengers) {
+      if (p.destinationFloor === this.currentFloor) {
+        p.dropoffTick = currentTick;
+        this.currentWeightKg = Math.max(0, this.currentWeightKg - p.weightKg);
+        alighting.push(p);
+      } else {
+        remaining.push(p);
+      }
+    }
+
+    this.onboardPassengers = remaining;
+    this.removeTarget(this.currentFloor);
+    return alighting;
+  }
+
+  // Finite State Machine Tick Logic
+  tick(currentTick, logger) {
+    switch (this.state) {
+      case 'IDLE':
+        this.direction = Direction.IDLE;
+        if (this.hasTarget(this.currentFloor)) {
+          this.state = 'DOORS_OPEN';
+          this.doorCountdown = DOOR_DWELL_TICKS;
+          logger(`Car #${this.id} doors opened at Floor ${this.currentFloor}.`, 'state');
+        } else if (this.hasTargetsAbove()) {
+          this.direction = Direction.UP;
+          this.state = 'MOVING_UP';
+        } else if (this.hasTargetsBelow()) {
+          this.direction = Direction.DOWN;
+          this.state = 'MOVING_DOWN';
+        }
+        break;
+
+      case 'MOVING_UP':
+        this.direction = Direction.UP;
+        if (this.currentFloor < TOTAL_FLOORS - 1) {
+          this.currentFloor++;
+          this.totalDistanceTraveled++;
+        }
+
+        if (this.hasTarget(this.currentFloor)) {
+          this.state = 'DOORS_OPEN';
+          this.doorCountdown = DOOR_DWELL_TICKS;
+          logger(`Car #${this.id} arrived & opened doors at Floor ${this.currentFloor}.`, 'state');
+        } else if (!this.hasTargetsAbove()) {
+          if (this.hasTargetsBelow()) {
+            this.direction = Direction.DOWN;
+            this.state = 'MOVING_DOWN';
+          } else {
+            this.direction = Direction.IDLE;
+            this.state = 'IDLE';
+          }
+        }
+        break;
+
+      case 'MOVING_DOWN':
+        this.direction = Direction.DOWN;
+        if (this.currentFloor > 0) {
+          this.currentFloor--;
+          this.totalDistanceTraveled++;
+        }
+
+        if (this.hasTarget(this.currentFloor)) {
+          this.state = 'DOORS_OPEN';
+          this.doorCountdown = DOOR_DWELL_TICKS;
+          logger(`Car #${this.id} arrived & opened doors at Floor ${this.currentFloor}.`, 'state');
+        } else if (!this.hasTargetsBelow()) {
+          if (this.hasTargetsAbove()) {
+            this.direction = Direction.UP;
+            this.state = 'MOVING_UP';
+          } else {
+            this.direction = Direction.IDLE;
+            this.state = 'IDLE';
+          }
+        }
+        break;
+
+      case 'DOORS_OPEN':
+        this.doorCountdown--;
+        if (this.doorCountdown <= 0) {
+          logger(`Car #${this.id} doors closed at Floor ${this.currentFloor}.`, 'state');
+
+          if (this.direction === Direction.UP && this.hasTargetsAbove()) {
+            this.state = 'MOVING_UP';
+          } else if (this.direction === Direction.DOWN && this.hasTargetsBelow()) {
+            this.state = 'MOVING_DOWN';
+          } else if (this.hasTargetsAbove()) {
+            this.direction = Direction.UP;
+            this.state = 'MOVING_UP';
+          } else if (this.hasTargetsBelow()) {
+            this.direction = Direction.DOWN;
+            this.state = 'MOVING_DOWN';
+          } else {
+            this.direction = Direction.IDLE;
+            this.state = 'IDLE';
+          }
+        }
+        break;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4. STRATEGY PATTERN (SCHEDULING ALGORITHMS)
+// ---------------------------------------------------------------------------
+const Strategies = {
+  // 1. FCFS: Assigns to whichever car has the fewest pending targets
+  FCFS: {
+    name: 'FCFS (First-Come, First-Served)',
+    description: 'Assigns request to whichever car has the smallest current backlog, strictly preserving arrival order.',
+    select(elevators, reqFloor, reqDir) {
+      let best = elevators[0];
+      let minLoad = Infinity;
+      for (const e of elevators) {
+        const load = e.targetFloors.size + e.onboardPassengers.length;
+        if (load < minLoad) {
+          minLoad = load;
+          best = e;
+        }
+      }
+      return best;
+    }
+  },
+
+  // 2. Nearest-Car (SSTF): Minimizes instant physical distance
+  NEAREST: {
+    name: 'Nearest-Car (SSTF)',
+    description: 'Chooses the elevator with the lowest instantaneous floor distance. Vulnerable to passenger starvation!',
+    select(elevators, reqFloor, reqDir) {
+      let best = elevators[0];
+      let bestScore = Infinity;
+
+      for (const e of elevators) {
+        const dist = Math.abs(e.currentFloor - reqFloor);
+        let score = dist;
+
+        if (e.direction === Direction.IDLE) {
+          // Excellent candidate
+        } else if (e.direction === reqDir && ((e.direction === Direction.UP && reqFloor >= e.currentFloor) ||
+                                              (e.direction === Direction.DOWN && reqFloor <= e.currentFloor))) {
+          score += (e.targetFloors.size * 0.5);
+        } else {
+          score += (TOTAL_FLOORS * 1.5) + e.targetFloors.size;
+        }
+
+        if (score < bestScore) {
+          bestScore = score;
+          best = e;
+        }
+      }
+      return best;
+    }
+  },
+
+  // 3. SCAN / LOOK (Elevator Sweep): Directional sweep that eliminates starvation
+  SCAN: {
+    name: 'SCAN / LOOK (Elevator Sweep)',
+    description: 'Continuous directional sweep prioritizing in-flight aligned cars. Completely avoids starvation.',
+    select(elevators, reqFloor, reqDir) {
+      let best = elevators[0];
+      let bestFom = Infinity;
+
+      for (const e of elevators) {
+        const dist = Math.abs(e.currentFloor - reqFloor);
+        let fom;
+
+        if (e.direction === reqDir) {
+          if ((e.direction === Direction.UP && e.currentFloor <= reqFloor) ||
+              (e.direction === Direction.DOWN && e.currentFloor >= reqFloor)) {
+            fom = dist; // Top priority: on current sweep
+          } else {
+            fom = dist + TOTAL_FLOORS * 2.0;
+          }
+        } else if (e.direction === Direction.IDLE) {
+          fom = dist + 2.0; // Ready idle car
+        } else {
+          fom = dist + TOTAL_FLOORS * 1.5; // Moving away / turnaround
+        }
+
+        if (fom < bestFom) {
+          bestFom = fom;
+          best = e;
+        }
+      }
+      return best;
+    }
+  }
+};
+
+// ---------------------------------------------------------------------------
+// 5. MASTER SIMULATION CONTROLLER
+// ---------------------------------------------------------------------------
+class SimulationApp {
+  constructor() {
+    this.currentStrategyKey = 'SCAN';
+    this.currentTick = 0;
+    this.isRunning = false;
+    this.intervalId = null;
+    this.speed = 1.0;
+    this.paxCounter = 1;
+
+    // Building topology
+    this.elevators = [];
+    for (let i = 0; i < NUM_ELEVATORS; i++) {
+      const initialFloor = Math.floor(i * (TOTAL_FLOORS - 1) / (NUM_ELEVATORS - 1));
+      this.elevators.push(new Elevator(i + 1, initialFloor));
+    }
+
+    // Floor waiting queues: floors[0] to floors[9]
+    this.floors = Array.from({ length: TOTAL_FLOORS }, () => []);
+
+    // Metrics
+    this.completedPassengers = [];
+
+    // Initialize UI
+    this.initDOM();
+    this.setupEventListeners();
+    this.render();
+  }
+
+  log(message, type = 'info') {
+    const logBox = document.getElementById('eventLog');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    entry.textContent = `[Tick ${this.currentTick}] ${message}`;
+    logBox.appendChild(entry);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  setStrategy(strategyKey) {
+    this.currentStrategyKey = strategyKey;
+    const strat = Strategies[strategyKey];
+    document.getElementById('activeStrategyName').textContent = strat.name;
+
+    const explainer = document.getElementById('strategyExplainer');
+    explainer.innerHTML = `<strong>Active: ${strat.name}</strong><p>${strat.description}</p>`;
+
+    document.querySelectorAll('.strat-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.strategy === strategyKey);
+    });
+
+    this.log(`Swapped active scheduling strategy to: ${strat.name}`, 'info');
+  }
+
+  addPassenger(name, src, dst, weight) {
+    if (src === dst) {
+      alert('Source and destination floor cannot be identical!');
+      return;
+    }
+
+    const pax = new Passenger(name || `PAX-${this.paxCounter++}`, src, dst, weight, this.currentTick);
+    this.floors[src].push(pax);
+
+    // Dispatch using active Strategy
+    const strat = Strategies[this.currentStrategyKey];
+    const assignedCar = strat.select(this.elevators, src, pax.getDesiredDirection());
+    assignedCar.addTarget(src);
+
+    this.log(`Passenger ${pax.id} (${pax.weightKg} kg) requested Floor ${src} ➔ ${dst}. Assigned to Car #${assignedCar.id}.`, 'board');
+    this.render();
+  }
+
+  step() {
+    this.currentTick++;
+
+    // 1. Advance elevators
+    for (const car of this.elevators) {
+      car.tick(this.currentTick, (msg, type) => this.log(msg, type));
+
+      // 2. If doors are open, disembark arriving passengers
+      if (car.state === 'DOORS_OPEN' && car.doorCountdown === DOOR_DWELL_TICKS - 1) {
+        const alighting = car.disembarkPassengers(this.currentTick);
+        for (const p of alighting) {
+          this.completedPassengers.push(p);
+          this.log(`Passenger ${p.id} disembarked at Floor ${car.currentFloor} (Wait: ${p.getWaitTime()}t, Trip: ${p.getTransitTime()}t).`, 'alight');
+        }
+
+        // 3. Board waiting passengers at this floor
+        const waitingAtFloor = this.floors[car.currentFloor];
+        const remainingOnFloor = [];
+
+        for (const p of waitingAtFloor) {
+          const matchesDir = (car.direction === Direction.IDLE) ||
+                             (car.direction === p.getDesiredDirection()) ||
+                             (!car.hasTargetsAbove() && !car.hasTargetsBelow());
+
+          if (matchesDir) {
+            const boarded = car.boardPassenger(p, this.currentTick);
+            if (boarded) {
+              if (car.direction === Direction.IDLE) {
+                car.direction = p.getDesiredDirection();
+              }
+              this.log(`Passenger ${p.id} boarded Car #${car.id} for Floor ${p.destinationFloor}.`, 'board');
+            } else {
+              this.log(`Car #${car.id} capacity limit reached (${car.currentWeightKg}/${ELEVATOR_CAPACITY_KG} kg). Passenger ${p.id} must wait!`, 'warn');
+              remainingOnFloor.push(p);
+            }
+          } else {
+            remainingOnFloor.push(p);
+          }
+        }
+        this.floors[car.currentFloor] = remainingOnFloor;
+      }
+    }
+
+    this.render();
+  }
+
+  play() {
+    if (this.isRunning) return;
+    this.isRunning = true;
+    document.getElementById('playPauseBtn').textContent = '⏸ Pause';
+    document.getElementById('playPauseBtn').classList.replace('btn-primary', 'btn-secondary');
+
+    const intervalMs = Math.max(100, 1000 / this.speed);
+    this.intervalId = setInterval(() => {
+      this.step();
+    }, intervalMs);
+  }
+
+  pause() {
+    if (!this.isRunning) return;
+    this.isRunning = false;
+    clearInterval(this.intervalId);
+    this.intervalId = null;
+    document.getElementById('playPauseBtn').textContent = '▶ Play';
+    document.getElementById('playPauseBtn').classList.replace('btn-secondary', 'btn-primary');
+  }
+
+  reset() {
+    this.pause();
+    this.currentTick = 0;
+    this.paxCounter = 1;
+    this.completedPassengers = [];
+    this.floors = Array.from({ length: TOTAL_FLOORS }, () => []);
+
+    for (let i = 0; i < NUM_ELEVATORS; i++) {
+      const initialFloor = Math.floor(i * (TOTAL_FLOORS - 1) / (NUM_ELEVATORS - 1));
+      this.elevators[i] = new Elevator(i + 1, initialFloor);
+    }
+
+    document.getElementById('eventLog').innerHTML = `<div class="log-entry info">[Tick 0] Simulator reset to initial state.</div>`;
+    this.render();
+  }
+
+  spawnBatch(profile, count = 10) {
+    this.log(`Spawning ${count} passengers with profile: ${profile}`, 'info');
+
+    for (let i = 0; i < count; i++) {
+      const name = `P${this.paxCounter++}`;
+      const weight = Math.round((60 + Math.random() * 25) * 10) / 10;
+      let src, dst;
+
+      if (profile === 'UP_PEAK') {
+        src = (Math.random() < 0.8) ? 0 : Math.floor(Math.random() * TOTAL_FLOORS);
+        dst = (src === 0) ? (1 + Math.floor(Math.random() * (TOTAL_FLOORS - 1))) : Math.floor(Math.random() * TOTAL_FLOORS);
+      } else if (profile === 'DOWN_PEAK') {
+        src = (Math.random() < 0.8) ? (1 + Math.floor(Math.random() * (TOTAL_FLOORS - 1))) : Math.floor(Math.random() * TOTAL_FLOORS);
+        dst = (src !== 0 && Math.random() < 0.8) ? 0 : Math.floor(Math.random() * TOTAL_FLOORS);
+      } else {
+        src = Math.floor(Math.random() * TOTAL_FLOORS);
+        dst = Math.floor(Math.random() * TOTAL_FLOORS);
+      }
+
+      while (dst === src) {
+        dst = Math.floor(Math.random() * TOTAL_FLOORS);
+      }
+
+      this.addPassenger(name, src, dst, weight);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 6. DOM SETUP & RENDERING
+  // ---------------------------------------------------------------------------
+  initDOM() {
+    const container = document.getElementById('buildingContainer');
+    container.innerHTML = '';
+
+    const grid = document.createElement('div');
+    grid.className = 'building-grid';
+
+    // Render floor rows from Floor 9 down to Floor 0
+    for (let f = TOTAL_FLOORS - 1; f >= 0; f--) {
+      const row = document.createElement('div');
+      row.className = 'floor-row';
+      row.dataset.floor = f;
+
+      // Floor label
+      const label = document.createElement('div');
+      label.className = 'floor-label';
+      label.innerHTML = `FL <span class="num">${f}</span>`;
+      row.appendChild(label);
+
+      // Shaft slots
+      for (let s = 0; s < NUM_ELEVATORS; s++) {
+        const slot = document.createElement('div');
+        slot.className = 'shaft-slot';
+        row.appendChild(slot);
+      }
+
+      // Landing waiting queue
+      const queue = document.createElement('div');
+      queue.className = 'landing-queue';
+      queue.id = `queue-floor-${f}`;
+      row.appendChild(queue);
+
+      grid.appendChild(row);
+    }
+    container.appendChild(grid);
+
+    // Render animated elevator cars overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'elevators-overlay';
+
+    for (let i = 0; i < NUM_ELEVATORS; i++) {
+      const col = document.createElement('div');
+      col.className = 'elevator-shaft-column';
+
+      const car = document.createElement('div');
+      car.className = 'elevator-car idle';
+      car.id = `elevator-car-${i}`;
+
+      car.innerHTML = `
+        <div class="car-top">
+          <span class="car-id">#${i + 1}</span>
+          <span class="car-dir-icon" id="car-dir-${i}">⏸</span>
+        </div>
+        <div class="cabin-door-wrapper" id="car-doors-${i}">
+          <div class="sliding-door left"></div>
+          <div class="sliding-door right"></div>
+          <div class="car-interior-pax" id="car-pax-count-${i}">0 pax</div>
+        </div>
+        <div class="car-bottom">
+          <span id="car-weight-text-${i}">0 kg</span>
+          <div class="car-weight-bar">
+            <div class="car-weight-fill" id="car-weight-bar-${i}" style="width: 0%;"></div>
+          </div>
+        </div>
+      `;
+
+      col.appendChild(car);
+      overlay.appendChild(col);
+    }
+    container.appendChild(overlay);
+
+    // Setup car meters in bottom strip
+    const metersBox = document.getElementById('carMeters');
+    metersBox.innerHTML = '';
+    for (let i = 0; i < NUM_ELEVATORS; i++) {
+      const card = document.createElement('div');
+      card.className = 'car-meter-card';
+      card.id = `car-meter-${i}`;
+      card.innerHTML = `
+        <div class="car-meter-header">
+          <span>Car #${i + 1}</span>
+          <span class="car-meter-status" id="meter-status-${i}">IDLE</span>
+        </div>
+        <div class="car-meter-details">
+          <span>Floor: <strong id="meter-floor-${i}">0</strong></span>
+          <span>Load: <strong id="meter-load-${i}">0/8</strong></span>
+          <span>Stops: <strong id="meter-targets-${i}">[]</strong></span>
+        </div>
+      `;
+      metersBox.appendChild(card);
+    }
+  }
+
+  render() {
+    // 1. Tick counter
+    document.getElementById('tickDisplay').textContent = this.currentTick;
+
+    // 2. Render Elevator Positions & States
+    for (let i = 0; i < NUM_ELEVATORS; i++) {
+      const car = this.elevators[i];
+      const carEl = document.getElementById(`elevator-car-${i}`);
+      const dirEl = document.getElementById(`car-dir-${i}`);
+      const paxEl = document.getElementById(`car-pax-count-${i}`);
+      const weightText = document.getElementById(`car-weight-text-${i}`);
+      const weightBar = document.getElementById(`car-weight-bar-${i}`);
+
+      // Smooth vertical movement: Floor 9 is top: 0%, Floor 0 is top: 90%
+      const topPercent = (TOTAL_FLOORS - 1 - car.currentFloor) * 10;
+      carEl.style.top = `${topPercent}%`;
+
+      // State visual styling
+      carEl.className = 'elevator-car';
+      if (car.state === 'DOORS_OPEN') {
+        carEl.classList.add('doors-open');
+      } else if (car.state === 'MOVING_UP') {
+        carEl.classList.add('moving-up');
+      } else if (car.state === 'MOVING_DOWN') {
+        carEl.classList.add('moving-down');
+      } else {
+        carEl.classList.add('idle');
+      }
+
+      // Direction icon
+      dirEl.textContent = car.direction === Direction.UP ? '▲' :
+                          car.direction === Direction.DOWN ? '▼' : '⏸';
+
+      // Pax and weight
+      paxEl.textContent = `${car.onboardPassengers.length} pax`;
+      weightText.textContent = `${Math.round(car.currentWeightKg)} kg`;
+
+      const weightPct = Math.min(100, (car.currentWeightKg / ELEVATOR_CAPACITY_KG) * 100);
+      weightBar.style.width = `${weightPct}%`;
+      weightBar.classList.toggle('overload', weightPct > 95);
+
+      // Meter cards at bottom
+      document.getElementById(`meter-status-${i}`).textContent = car.state;
+      document.getElementById(`meter-floor-${i}`).textContent = car.currentFloor;
+      document.getElementById(`meter-load-${i}`).textContent = `${car.onboardPassengers.length} (${Math.round(car.currentWeightKg)}kg)`;
+      const targetsArr = Array.from(car.targetFloors).sort((a,b) => a-b);
+      document.getElementById(`meter-targets-${i}`).textContent = targetsArr.length ? `[${targetsArr.join(',')}]` : '[]';
+    }
+
+    // 3. Render Floor Waiting Queues
+    for (let f = 0; f < TOTAL_FLOORS; f++) {
+      const qEl = document.getElementById(`queue-floor-${f}`);
+      qEl.innerHTML = '';
+      const waiting = this.floors[f];
+      for (const p of waiting) {
+        const chip = document.createElement('span');
+        chip.className = 'pax-chip';
+        chip.innerHTML = `${p.id} <span class="dest">➔ ${p.destinationFloor}</span>`;
+        qEl.appendChild(chip);
+      }
+    }
+
+    // 4. Update KPI Metrics Cards
+    const completedCount = this.completedPassengers.length;
+    document.getElementById('kpiServed').textContent = completedCount;
+
+    let avgWait = 0;
+    let maxWait = 0;
+    let avgTransit = 0;
+
+    if (completedCount > 0) {
+      const totalWait = this.completedPassengers.reduce((sum, p) => sum + p.getWaitTime(), 0);
+      avgWait = (totalWait / completedCount).toFixed(1);
+      maxWait = Math.max(...this.completedPassengers.map(p => p.getWaitTime()));
+
+      const totalTransit = this.completedPassengers.reduce((sum, p) => sum + p.getTransitTime(), 0);
+      avgTransit = (totalTransit / completedCount).toFixed(1);
+    }
+
+    const totalDist = this.elevators.reduce((sum, e) => sum + e.totalDistanceTraveled, 0);
+    const totalEnergy = (totalDist * 0.5).toFixed(1);
+
+    document.getElementById('kpiAvgWait').innerHTML = `${avgWait}<small>t</small>`;
+    document.getElementById('kpiMaxWait').innerHTML = `${maxWait}<small>t</small>`;
+    document.getElementById('kpiDistance').innerHTML = `${totalDist}<small> fl</small>`;
+    document.getElementById('kpiEnergy').innerHTML = `${totalEnergy}<small> kWh</small>`;
+    document.getElementById('kpiAvgTransit').innerHTML = `${avgTransit}<small>t</small>`;
+  }
+
+  setupEventListeners() {
+    // Play/Pause
+    document.getElementById('playPauseBtn').addEventListener('click', () => {
+      if (this.isRunning) this.pause();
+      else this.play();
+    });
+
+    // Step 1 Tick
+    document.getElementById('stepBtn').addEventListener('click', () => {
+      this.pause();
+      this.step();
+    });
+
+    // Reset
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      this.reset();
+    });
+
+    // Speed Slider
+    document.getElementById('speedSlider').addEventListener('input', (e) => {
+      this.speed = parseFloat(e.target.value);
+      document.getElementById('speedDisplay').textContent = `${this.speed.toFixed(1)}x`;
+      if (this.isRunning) {
+        this.pause();
+        this.play();
+      }
+    });
+
+    // Strategy Buttons
+    document.querySelectorAll('.strat-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.setStrategy(btn.dataset.strategy);
+      });
+    });
+
+    // Passenger Form Submit
+    document.getElementById('passengerForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = document.getElementById('paxName').value.trim();
+      const src = parseInt(document.getElementById('srcFloor').value);
+      const dst = parseInt(document.getElementById('dstFloor').value);
+      const weight = parseFloat(document.getElementById('paxWeight').value) || 70;
+
+      this.addPassenger(name, src, dst, weight);
+    });
+
+    // Preset Traffic Influx
+    document.getElementById('presetUpPeak').addEventListener('click', () => this.spawnBatch('UP_PEAK', 10));
+    document.getElementById('presetDownPeak').addEventListener('click', () => this.spawnBatch('DOWN_PEAK', 10));
+    document.getElementById('presetRandom').addEventListener('click', () => this.spawnBatch('INTER_FLOOR', 10));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7. INITIALIZE ON DOM READY
+// ---------------------------------------------------------------------------
+window.addEventListener('DOMContentLoaded', () => {
+  window.simulator = new SimulationApp();
+});
