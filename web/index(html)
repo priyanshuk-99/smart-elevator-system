@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Elevator Simulator — Multi-Lift Scheduling</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- TOP HEADER -->
+    <header class="app-header">
+      <div class="logo-group">
+        <div class="logo-icon">🛗</div>
+        <div>
+          <h1>Smart Elevator Simulator</h1>
+          <p class="subtitle">Multi-Lift Scheduling & Empirical Benchmarking Suite</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <div class="status-badge" id="strategyBadge">
+          <span class="dot"></span>
+          <span id="activeStrategyName">SCAN / LOOK Strategy</span>
+        </div>
+        <div class="tick-counter">
+          <span class="label">SIMULATION TICK</span>
+          <span class="value" id="tickDisplay">0</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN GRID -->
+    <main class="main-content">
+      <!-- LEFT COLUMN: CONTROLS & PASSENGER INPUT -->
+      <aside class="panel controls-panel">
+        <!-- SIMULATION CONTROLS -->
+        <section class="card">
+          <div class="card-header">
+            <h3>⏱️ Simulation Clock</h3>
+          </div>
+          <div class="sim-actions">
+            <button id="playPauseBtn" class="btn btn-primary">▶ Play</button>
+            <button id="stepBtn" class="btn btn-secondary">⏭ Step (1t)</button>
+            <button id="resetBtn" class="btn btn-outline">↺ Reset</button>
+          </div>
+          <div class="speed-control">
+            <label for="speedSlider">Clock Speed: <span id="speedDisplay">1.0x</span></label>
+            <input type="range" id="speedSlider" min="0.5" max="5" step="0.5" value="1">
+          </div>
+        </section>
+
+        <!-- ALGORITHM SELECTION (STRATEGY PATTERN) -->
+        <section class="card">
+          <div class="card-header">
+            <h3>🔀 Scheduling Strategy</h3>
+            <span class="badge-tag">Strategy Pattern</span>
+          </div>
+          <div class="strategy-selector">
+            <button class="strat-btn" data-strategy="FCFS">
+              <span class="name">1. FCFS</span>
+              <span class="desc">First-Come First-Served queue</span>
+            </button>
+            <button class="strat-btn" data-strategy="NEAREST">
+              <span class="name">2. Nearest-Car (SSTF)</span>
+              <span class="desc">Shortest distance (High starvation risk)</span>
+            </button>
+            <button class="strat-btn active" data-strategy="SCAN">
+              <span class="name">3. SCAN / LOOK</span>
+              <span class="desc">Directional sweep (Eliminates starvation)</span>
+            </button>
+          </div>
+          <div class="strategy-info-box" id="strategyExplainer">
+            <strong>Active: SCAN / LOOK</strong>
+            <p>Elevator sweeps continuously in current direction picking up aligned hall calls. Prevents starvation on distant floors.</p>
+          </div>
+        </section>
+
+        <!-- MANUAL PASSENGER INPUT FORM -->
+        <section class="card">
+          <div class="card-header">
+            <h3>👤 Call Elevator (User Input)</h3>
+          </div>
+          <form id="passengerForm">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="paxName">Passenger Name</label>
+                <input type="text" id="paxName" placeholder="e.g. Alice" value="Alice">
+              </div>
+              <div class="form-group">
+                <label for="paxWeight">Weight (kg)</label>
+                <input type="number" id="paxWeight" value="70" min="40" max="150">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="srcFloor">Origin Floor</label>
+                <select id="srcFloor">
+                  <option value="0" selected>Floor 0 (Lobby)</option>
+                  <option value="1">Floor 1</option>
+                  <option value="2">Floor 2</option>
+                  <option value="3">Floor 3</option>
+                  <option value="4">Floor 4</option>
+                  <option value="5">Floor 5</option>
+                  <option value="6">Floor 6</option>
+                  <option value="7">Floor 7</option>
+                  <option value="8">Floor 8</option>
+                  <option value="9">Floor 9 (Penthouse)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="dstFloor">Target Floor</label>
+                <select id="dstFloor">
+                  <option value="0">Floor 0 (Lobby)</option>
+                  <option value="1">Floor 1</option>
+                  <option value="2">Floor 2</option>
+                  <option value="3">Floor 3</option>
+                  <option value="4">Floor 4</option>
+                  <option value="5">Floor 5</option>
+                  <option value="6">Floor 6</option>
+                  <option value="7">Floor 7</option>
+                  <option value="8" selected>Floor 8</option>
+                  <option value="9">Floor 9 (Penthouse)</option>
+                </select>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-accent full-width">⚡ Dispatch Elevator</button>
+          </form>
+
+          <!-- TRAFFIC PRESETS -->
+          <div class="traffic-presets">
+            <span class="preset-label">Traffic Influx Presets:</span>
+            <div class="preset-btns">
+              <button class="btn btn-sm" id="presetUpPeak">🌅 Morning Up-Peak (10p)</button>
+              <button class="btn btn-sm" id="presetDownPeak">🌇 Evening Down-Peak (10p)</button>
+              <button class="btn btn-sm" id="presetRandom">🎲 Random Flow (10p)</button>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <!-- CENTER COLUMN: ANIMATED BUILDING SHAFTS -->
+      <section class="panel building-panel">
+        <div class="panel-header">
+          <h2>🏢 10-Story Building & Elevator Shafts</h2>
+          <div class="shaft-legend">
+            <span class="legend-item"><span class="color-dot idle"></span> Idle</span>
+            <span class="legend-item"><span class="color-dot moving"></span> In Transit</span>
+            <span class="legend-item"><span class="color-dot doors"></span> Doors Open</span>
+          </div>
+        </div>
+
+        <div class="building-container" id="buildingContainer">
+          <!-- Building floors and shafts are generated dynamically by app.js -->
+        </div>
+
+        <!-- CAR TELEMETRY METERS -->
+        <div class="car-meters" id="carMeters">
+          <!-- Rendered dynamically -->
+        </div>
+      </section>
+
+      <!-- RIGHT COLUMN: ANALYTICS & EVENT LOG -->
+      <aside class="panel analytics-panel">
+        <!-- KPI METRICS CARDS -->
+        <section class="card">
+          <div class="card-header">
+            <h3>📊 Live Performance Metrics</h3>
+          </div>
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <span class="kpi-label">Passengers Served</span>
+              <span class="kpi-value highlight" id="kpiServed">0</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Avg Wait Time</span>
+              <span class="kpi-value" id="kpiAvgWait">0.0<small>t</small></span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Max Wait Time</span>
+              <span class="kpi-value" id="kpiMaxWait">0<small>t</small></span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Total Distance</span>
+              <span class="kpi-value" id="kpiDistance">0<small> fl</small></span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Est. Energy</span>
+              <span class="kpi-value" id="kpiEnergy">0.0<small> kWh</small></span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Avg Transit</span>
+              <span class="kpi-value" id="kpiAvgTransit">0.0<small>t</small></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- LIVE EVENT TELEMETRY LOG (OBSERVER PATTERN) -->
+        <section class="card flex-grow">
+          <div class="card-header">
+            <h3>📡 Real-Time Event Log</h3>
+            <span class="badge-tag">Observer Pattern</span>
+          </div>
+          <div class="event-log" id="eventLog">
+            <div class="log-entry info">[Tick 0] Simulator initialized. Ready for requests.</div>
+          </div>
+        </section>
+
+        <!-- VIVA CHEAT SHEET CARD -->
+        <section class="card viva-card">
+          <div class="card-header">
+            <h3>💡 Viva Talking Points</h3>
+          </div>
+          <ul class="viva-points">
+            <li><strong>Strategy Pattern:</strong> Swapping algorithms live updates the dispatching without touching elevator state machines.</li>
+            <li><strong>State Pattern:</strong> Each car transitions cleanly between <code>Idle</code>, <code>MovingUp</code>, <code>MovingDown</code>, and <code>DoorsOpen</code>.</li>
+            <li><strong>Starvation:</strong> Notice how SCAN avoids starving top floors during high traffic compared to Nearest-Car.</li>
+          </ul>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
